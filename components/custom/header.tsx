@@ -55,7 +55,7 @@ export function Header({
   actions,
 }: HeaderProps) {
   const [logoError, setLogoError] = useState(false);
-  const logoLetter = (appName ?? process.env.NEXT_PUBLIC_DERIV_APP_NAME ?? 'Deriv Trading')
+  const logoLetter = (appName ?? process.env.NEXT_PUBLIC_DERIV_APP_NAME ?? 'Senior Trader')
     .trim()
     .charAt(0)
     .toUpperCase() || 'D';
@@ -64,10 +64,10 @@ export function Header({
   const isAuthenticating = authState === 'authenticating';
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3 border-b bg-background/80 backdrop-blur-sm">
+    <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between border-b border-white/10 bg-[#08111f]/90 px-4 py-3 text-white shadow-2xl shadow-cyan-950/20 backdrop-blur-xl">
       <div className="flex items-center gap-3">
         {!logoSrc || logoError ? (
-          <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-emerald-400 text-sm font-black text-slate-950 shadow-lg shadow-cyan-500/20">
             {logoLetter}
           </div>
         ) : (
@@ -75,23 +75,26 @@ export function Header({
           <img
             src={logoSrc}
             alt="App Logo"
-            className="h-8 w-auto object-contain"
+            className="h-9 w-auto object-contain"
             onError={() => setLogoError(true)}
           />
         )}
-        <h1 className="text-lg font-semibold text-foreground hidden sm:block">
-          {process.env.NEXT_PUBLIC_DERIV_APP_NAME ?? 'Deriv Trading'}
-        </h1>
+        <div className="hidden sm:block">
+          <h1 className="text-base font-black tracking-tight text-white">
+            {process.env.NEXT_PUBLIC_DERIV_APP_NAME ?? 'Senior Trader'}
+          </h1>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-200/80">Multi-market terminal</p>
+        </div>
       </div>
       <div className="flex items-center gap-3">
         {actions}
         {isAuthenticated && activeAccount && (
           <Popover open={accountSwitcherOpen} onOpenChange={setAccountSwitcherOpen}>
             <PopoverTrigger asChild>
-              <button className="flex items-center gap-2 rounded-lg border border-border px-3 hover:bg-muted/50 transition-colors">
+              <button className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 transition-colors hover:bg-white/10">
                 <div className="text-left">
                   <AccountLabel type={activeAccount.account_type} />
-                  <p className="text-base font-bold text-foreground">
+                  <p className="text-base font-bold text-white">
                     {formatBalance(activeAccount.balance)} {activeAccount.currency}
                   </p>
                 </div>
@@ -136,16 +139,16 @@ export function Header({
           </Popover>
         )}
         {isAuthenticated ? (
-          <Button variant="destructive" onClick={onLogout}>
+          <Button variant="destructive" onClick={onLogout} className="rounded-full">
             Logout
           </Button>
         ) : (
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onLogin} disabled={isAuthenticating}>
+            <Button variant="outline" size="sm" onClick={onLogin} disabled={isAuthenticating} className="rounded-full border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white">
               {isAuthenticating ? 'Logging in...' : 'Log in'}
             </Button>
             {onSignUp && (
-              <Button size="sm" onClick={onSignUp} disabled={isAuthenticating}>
+              <Button size="sm" onClick={onSignUp} disabled={isAuthenticating} className="rounded-full bg-cyan-400 font-bold text-slate-950 hover:bg-cyan-300">
                 Sign up
               </Button>
             )}
