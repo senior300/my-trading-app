@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Footer } from '@/components/custom/footer';
 import { Header } from '@/components/custom/header';
@@ -14,15 +15,21 @@ import { Button } from '@/components/ui/button';
 import {
   Activity,
   BarChart3,
+  Blocks,
   Bot,
   BrainCircuit,
+  Calculator,
   CandlestickChart,
   CircleDollarSign,
+  Copy,
+  FileText,
   Globe2,
   LineChart,
   Phone,
+  Play,
   ShieldCheck,
   Sparkles,
+  X,
   Zap,
 } from 'lucide-react';
 import type {
@@ -45,15 +52,105 @@ const DIGIT_TRADE_TYPE_OPTIONS: { value: TradeType; label: string }[] = [
 const MARKET_CARDS = [
   { icon: CandlestickChart, name: 'Synthetic indices', detail: 'Volatility, Boom, Crash, Step' },
   { icon: CircleDollarSign, name: 'Forex majors', detail: 'EUR/USD, GBP/USD, USD/JPY' },
-  { icon: LineChart, name: 'Commodities', detail: 'Gold, oil, silver focused setups' },
-  { icon: Globe2, name: 'Crypto watchlist', detail: 'BTC, ETH, high momentum pairs' },
+  { icon: LineChart, name: 'Commodities', detail: 'Gold, oil, silver setups' },
+  { icon: Globe2, name: 'Crypto watchlist', detail: 'BTC, ETH, momentum pairs' },
 ];
 
-const BOT_CARDS = [
-  { name: 'Digit Sniper Bot', status: 'Ready', detail: 'Tracks last-digit distribution and prepares short tick entries.' },
-  { name: 'Trend Guard Bot', status: 'Monitor', detail: 'Filters markets using volatility and recent tick direction.' },
-  { name: 'Risk Shield', status: 'Active', detail: 'Keeps stake, duration, and account mode visible before execution.' },
+const BOT_MENU = [
+  'Analysis Logics',
+  'Trade parameters',
+  'Purchase conditions',
+  'Sell conditions',
+  'Restart trading conditions',
+  'Analysis',
+  'Virtual Hook Switcher',
 ];
+
+type BotId = 'digit-sniper' | 'match-hunter' | 'over-pulse' | 'under-sweep' | 'odd-even';
+
+interface BotPlan {
+  id: BotId;
+  name: string;
+  tradeType: TradeType;
+  contractMode: ContractMode;
+  digit: number;
+  duration: number;
+  confidence: number;
+  reason: string;
+}
+
+function clampDuration(value: number, limits: DurationLimits): number {
+  return Math.min(Math.max(value, limits.min), limits.max);
+}
+
+function buildBotPlans(digitStats: DigitStats, durationLimits: DurationLimits): BotPlan[] {
+  const percentages = digitStats.percentages.length === 10
+    ? digitStats.percentages
+    : Array.from({ length: 10 }, () => 0);
+  const total = digitStats.totalTicks || 0;
+  const maxPct = Math.max(...percentages);
+  const minPct = Math.min(...percentages);
+  const strongestDigit = percentages.indexOf(maxPct);
+  const weakestDigit = percentages.indexOf(minPct);
+  const lowPressure = percentages.slice(0, 5).reduce((sum, pct) => sum + pct, 0);
+  const highPressure = percentages.slice(5).reduce((sum, pct) => sum + pct, 0);
+  const evenPressure = percentages.filter((_, digit) => digit % 2 === 0).reduce((sum, pct) => sum + pct, 0);
+  const oddPressure = 100 - evenPressure;
+  const baseConfidence = total > 0 ? 54 : 35;
+
+  return [
+    {
+      id: 'digit-sniper',
+      name: 'Digit Sniper Bot',
+      tradeType: 'matches-differs',
+      contractMode: 'DIGITDIFF',
+      digit: weakestDigit,
+      duration: clampDuration(1, durationLimits),
+      confidence: Math.min(92, Math.round(baseConfidence + (100 - minPct) / 5)),
+      reason: `Avoids digit ${weakestDigit}; it is printing only ${minPct.toFixed(1)}%.`,
+    },
+    {
+      id: 'match-hunter',
+      name: 'Match Hunter Bot',
+      tradeType: 'matches-differs',
+      contractMode: 'DIGITMATCH',
+      digit: strongestDigit,
+      duration: clampDuration(1, durationLimits),
+      confidence: Math.min(88, Math.round(baseConfidence + maxPct * 1.4)),
+      reason: `Targets digit ${strongestDigit}; it leads at ${maxPct.toFixed(1)}%.`,
+    },
+    {
+      id: 'over-pulse',
+      name: 'Over Pulse Bot',
+      tradeType: 'over-under',
+      contractMode: 'DIGITOVER',
+      digit: highPressure >= lowPressure ? 4 : 3,
+      duration: clampDuration(2, durationLimits),
+      confidence: Math.min(90, Math.round(baseConfidence + Math.abs(highPressure - lowPressure) / 2)),
+      reason: `High digit pressure: ${highPressure.toFixed(1)}%.`,
+    },
+    {
+      id: 'under-sweep',
+      name: 'Under Sweep Bot',
+      tradeType: 'over-under',
+      contractMode: 'DIGITUNDER',
+      digit: lowPressure >= highPressure ? 5 : 6,
+      duration: clampDuration(2, durationLimits),
+      confidence: Math.min(90, Math.round(baseConfidence + Math.abs(lowPressure - highPressure) / 2)),
+      reason: `Low digit pressure: ${lowPressure.toFixed(1)}%.`,
+    },
+    {
+      id: 'odd-even',
+      name: 'Odd Even Bot',
+      tradeType: 'even-odd',
+      contractMode: evenPressure >= oddPressure ? 'DIGITEVEN' : 'DIGITODD',
+      digit: 0,
+      duration: clampDuration(1, durationLimits),
+      confidence: Math.min(89, Math.round(baseConfidence + Math.abs(evenPressure - oddPressure) / 2)),
+      reason: `${evenPressure >= oddPressure ? 'Even' : 'Odd'} side leads at ${Math.max(evenPressure, oddPressure).toFixed(1)}%.`,
+    },
+  ];
+}
 
 export interface DigitsViewProps {
   authState: AuthState;
@@ -135,13 +232,55 @@ export function DigitsView({
   appName,
 }: DigitsViewProps) {
   const isAuthenticated = authState === 'authenticated';
+  const [pendingBot, setPendingBot] = useState<BotPlan | null>(null);
+  const botPlans = useMemo(
+    () => buildBotPlans(digitStats, durationLimits),
+    [digitStats, durationLimits]
+  );
   const accountBalance = activeAccount
     ? `${Number(activeAccount.balance).toLocaleString('en-US', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })} ${activeAccount.currency}`
     : 'Connect account';
-  const visibleSymbols = symbols.slice(0, 6);
+
+  function runBotTrade(plan: BotPlan) {
+    if (!isAuthenticated || !isConnected || isBuying) return;
+
+    setTradeType(plan.tradeType);
+    setContractMode(plan.contractMode);
+    setSelectedDigit(plan.digit);
+    setDuration(plan.duration);
+    if (!stake || Number(stake) <= 0) setStake('1');
+    setPendingBot(plan);
+  }
+
+  useEffect(() => {
+    if (!pendingBot || !isAuthenticated || !isConnected || isBuying || isProposalLoading || !proposal) return;
+
+    const settingsReady =
+      tradeType === pendingBot.tradeType &&
+      contractMode === pendingBot.contractMode &&
+      selectedDigit === pendingBot.digit &&
+      duration === pendingBot.duration;
+
+    if (!settingsReady) return;
+
+    setPendingBot(null);
+    void buyContract();
+  }, [
+    buyContract,
+    contractMode,
+    duration,
+    isAuthenticated,
+    isBuying,
+    isConnected,
+    isProposalLoading,
+    pendingBot,
+    proposal,
+    selectedDigit,
+    tradeType,
+  ]);
 
   if (error) {
     return (
@@ -174,212 +313,204 @@ export function DigitsView({
       />
       <div className={isAuthenticated ? 'h-[76px] shrink-0' : 'h-[66px] shrink-0'} />
 
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-3 pb-14 sm:px-5 sm:py-5 lg:flex-none lg:overflow-visible">
-        <section className="senior-hero">
-          <div className="senior-hero-copy">
-            <div className="senior-kicker">
-              <Sparkles className="h-4 w-4" />
-              Senior Trader automation suite
-            </div>
-            <h2>Trade smarter across markets with bots, live ticks, and controlled execution.</h2>
-            <p>
-              A polished trading terminal for synthetic indices, forex, commodities, and crypto watchlists.
-              Login to connect your account, review the market, configure a bot idea, and execute from one dashboard.
-            </p>
-            <div className="senior-hero-actions">
-              <Button
-                onClick={onLogin}
-                disabled={authState === 'authenticating'}
-                className="rounded-full bg-cyan-400 px-6 font-black text-slate-950 hover:bg-cyan-300"
-              >
-                {isAuthenticated ? 'Account connected' : authState === 'authenticating' ? 'Connecting...' : 'Login and trade'}
-              </Button>
-              <Button
-                onClick={onSignUp}
-                variant="outline"
-                className="rounded-full border-white/20 bg-white/10 px-6 font-bold text-white hover:bg-white/20 hover:text-white"
-              >
-                Create account
-              </Button>
-              <a href="tel:0718462802" className="senior-phone">
-                <Phone className="h-4 w-4" />
-                0718462802
-              </a>
-            </div>
-          </div>
-
-          <div className="senior-account-card">
-            <span>Trading balance</span>
-            <strong>{accountBalance}</strong>
-            <div className="senior-status-row">
-              <span className={isConnected ? 'is-live' : ''}>
-                <Activity className="h-4 w-4" />
-                {isConnected ? 'Live feed connected' : 'Waiting for market feed'}
-              </span>
-              <span>
-                <ShieldCheck className="h-4 w-4" />
-                {isAuthenticated ? activeAccount?.account_type ?? 'Account' : 'Login required'}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="senior-overview-grid">
-          <div className="senior-panel senior-panel-wide">
-            <div className="senior-section-heading">
-              <div>
-                <span>Markets</span>
-                <h3>All-market command center</h3>
+      {!isAuthenticated ? (
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-5 pb-14">
+          <section className="senior-login-page">
+            <div className="senior-hero-copy">
+              <div className="senior-kicker">
+                <Sparkles className="h-4 w-4" />
+                Senior Trader
               </div>
-              <BarChart3 className="h-6 w-6" />
+              <h2>Login first. Trade on the bot-builder screen.</h2>
+              <p>
+                A focused trading app with five market-analysis bots. Connect your Deriv account, then enter a
+                dedicated trading workspace with live ticks, bot plans, and controlled execution.
+              </p>
+              <div className="senior-hero-actions">
+                <Button
+                  onClick={onLogin}
+                  disabled={authState === 'authenticating'}
+                  className="rounded-full bg-cyan-400 px-6 font-black text-slate-950 hover:bg-cyan-300"
+                >
+                  {authState === 'authenticating' ? 'Connecting...' : 'Login to dashboard'}
+                </Button>
+                <Button
+                  onClick={onSignUp}
+                  variant="outline"
+                  className="rounded-full border-white/20 bg-white/10 px-6 font-bold text-white hover:bg-white/20 hover:text-white"
+                >
+                  Create account
+                </Button>
+                <a href="tel:0718462802" className="senior-phone">
+                  <Phone className="h-4 w-4" />
+                  0718462802
+                </a>
+              </div>
             </div>
-            <div className="senior-market-grid">
-              {MARKET_CARDS.map((market) => {
-                const Icon = market.icon;
-                return (
-                  <div className="senior-market-card" key={market.name}>
-                    <Icon className="h-5 w-5" />
-                    <strong>{market.name}</strong>
-                    <span>{market.detail}</span>
-                  </div>
-                );
-              })}
+            <div className="senior-login-card">
+              <strong>Next screen</strong>
+              <span>Bot Builder</span>
+              <p>After login, this page changes into a full bot-builder terminal. No trading happens on the intro page.</p>
             </div>
+          </section>
+
+          <section className="senior-login-steps">
+            {['Login securely', 'Open bot builder', 'Run selected bot'].map((step, index) => (
+              <div key={step}>
+                <span>0{index + 1}</span>
+                <strong>{step}</strong>
+                <p>{index === 0 ? 'Use Deriv authentication.' : index === 1 ? 'View analysis and bot blocks.' : 'Click Run trade when ready.'}</p>
+              </div>
+            ))}
+          </section>
+        </div>
+      ) : (
+        <div className="senior-builder">
+          <div className="senior-red-strip">
+            DOLLARPRINTER STYLE - YOUR HUB FOR TRADING KNOWLEDGE, DERIV INDICES, AND BOT AUTOMATION
+            <X className="h-5 w-5" />
           </div>
 
-          <div className="senior-panel">
-            <div className="senior-section-heading">
-              <div>
-                <span>Bots</span>
-                <h3>Strategy automation</h3>
-              </div>
-              <Bot className="h-6 w-6" />
-            </div>
-            <div className="senior-bot-list">
-              {BOT_CARDS.map((bot) => (
-                <div className="senior-bot-card" key={bot.name}>
-                  <BrainCircuit className="h-5 w-5" />
-                  <div>
-                    <strong>{bot.name}</strong>
-                    <p>{bot.detail}</p>
-                  </div>
-                  <span>{bot.status}</span>
-                </div>
+          <nav className="senior-blue-tabs">
+            {[
+              ['Dashboard', Blocks],
+              ['Bot Builder', Bot],
+              ['Charts', LineChart],
+              ['Trading Bots', BrainCircuit],
+              ['Analysis Tool', BarChart3],
+              ['Strategies', ShieldCheck],
+              ['Risk Calculator', Calculator],
+              ['Copy Trading', Copy],
+              ['DTrader', CandlestickChart],
+            ].map(([label, Icon]) => {
+              const TabIcon = Icon as typeof Bot;
+              return (
+                <button className={label === 'Bot Builder' ? 'active' : ''} key={label as string} type="button">
+                  <TabIcon className="h-4 w-4" />
+                  {label as string}
+                </button>
+              );
+            })}
+          </nav>
+
+          <section className="senior-builder-grid">
+            <aside className="senior-blocks-menu">
+              <button className="quick">Quick strategy</button>
+              <div className="blocks-title">Blocks menu</div>
+              <input placeholder="Search" />
+              {BOT_MENU.map((item) => (
+                <button key={item} type="button">{item}</button>
               ))}
-            </div>
-          </div>
-        </section>
+              <span className="risk-chip">Risk Disclaimer</span>
+            </aside>
 
-        {isLoading ? (
-          <>
-            <div className="flex gap-2">
-              <Skeleton className="h-8 w-32 rounded-full" />
-              <Skeleton className="h-8 w-28 rounded-full" />
-              <Skeleton className="h-8 w-24 rounded-full" />
-            </div>
-            <Skeleton className="h-[420px] w-full rounded-xl" />
-          </>
-        ) : (
-          <>
-            <div className="senior-trade-topline">
-              <div>
-                <span>Trade terminal</span>
-                <h3>Digits execution workspace</h3>
+            <section className="senior-builder-canvas">
+              <div className="senior-toolbar">
+                <FileText className="h-5 w-5" />
+                <LineChart className="h-5 w-5" />
+                <Zap className="h-5 w-5" />
+                <span />
+                <Activity className="h-5 w-5" />
               </div>
-              <div className="shrink-0 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
-                <TradeTypeChips
-                  value={tradeType}
-                  options={DIGIT_TRADE_TYPE_OPTIONS}
-                  onValueChange={setTradeType}
-                />
-              </div>
-            </div>
 
-            <Card className="senior-trade-card mb-12 shrink-0">
-              <CardContent className="flex flex-col p-3 pb-2 pt-3 sm:p-6 sm:pb-6 sm:pt-4">
-                <div className={`lg:grid lg:overflow-visible ${tradeType !== 'even-odd' ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
-                  <div className="flex flex-col pb-4 pt-1 sm:pb-6 sm:pt-2 lg:py-0 lg:pr-6">
-                    <div className="senior-column-label">
-                      <Zap className="h-4 w-4" />
-                      Market selector
-                    </div>
-                    <SymbolSelector
-                      symbols={symbols}
-                      activeSymbol={activeSymbol}
-                      onSymbolChange={selectSymbol}
-                    />
-                    {visibleSymbols.length > 0 && (
-                      <div className="senior-symbol-strip">
-                        {visibleSymbols.map((symbol) => (
-                          <button key={symbol.underlying_symbol} onClick={() => selectSymbol(symbol.underlying_symbol)}>
-                            {symbol.underlying_symbol_name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex min-h-24 items-center justify-center sm:min-h-32 lg:flex-1">
-                      <CurrentTickDisplay
-                        tick={currentTick}
-                        lastDigit={lastDigit}
-                        activeSymbol={activeSymbol}
-                        pipSize={pipSize}
-                      />
-                    </div>
+              {isLoading ? (
+                <Skeleton className="h-[520px] w-full rounded-xl" />
+              ) : (
+                <div className="senior-block-board">
+                  <div className="bot-block trade-params">
+                    <h3>1. Trade parameters</h3>
+                    <div className="block-row"><span>Market</span><b>{activeSymbol?.underlying_symbol_name ?? 'Select market'}</b></div>
+                    <div className="block-row"><span>Trade type</span><b>{tradeType}</b></div>
+                    <div className="block-row"><span>Contract</span><b>{contractMode}</b></div>
+                    <div className="block-row"><span>Stake</span><b>{stake || '1'} USD</b></div>
+                    <div className="block-row"><span>Duration</span><b>{duration} ticks</b></div>
+                    <p>print Dollar mode activated - stay ready</p>
                   </div>
 
-                  <div className="divide-y divide-border max-lg:border-t lg:contents">
-                    {tradeType !== 'even-odd' && (
-                      <div className="py-4 sm:py-6 lg:border-l lg:border-border lg:px-6 lg:py-0">
-                        <div className="senior-column-label">
-                          <BarChart3 className="h-4 w-4" />
-                          Digit analytics
-                        </div>
-                        <DigitStatsBar
-                          digitStats={digitStats}
-                          selectedDigit={selectedDigit}
-                          onDigitSelect={setSelectedDigit}
-                        />
-                      </div>
-                    )}
+                  <div className="bot-block purchase">
+                    <h3>2. Purchase conditions</h3>
+                    <SymbolSelector symbols={symbols} activeSymbol={activeSymbol} onSymbolChange={selectSymbol} />
+                    <TradeTypeChips value={tradeType} options={DIGIT_TRADE_TYPE_OPTIONS} onValueChange={setTradeType} />
+                    <CurrentTickDisplay tick={currentTick} lastDigit={lastDigit} activeSymbol={activeSymbol} pipSize={pipSize} />
+                  </div>
 
-                    <div className="pt-4 sm:pt-6 lg:border-l lg:border-border lg:pl-6 lg:pt-0">
-                      <div className="senior-column-label">
-                        <Bot className="h-4 w-4" />
-                        Bot execution
-                      </div>
-                      <TradeControls
-                        tradeType={tradeType}
-                        contractMode={contractMode}
-                        onContractModeChange={setContractMode}
-                        selectedDigit={selectedDigit}
-                        isConnected={isConnected}
-                        stake={stake}
-                        onStakeChange={setStake}
-                        duration={duration}
-                        onDurationChange={setDuration}
-                        durationLimits={durationLimits}
-                        proposal={proposal}
-                        isProposalLoading={isProposalLoading}
-                        onBuy={buyContract}
-                        isBuying={isBuying}
-                        buyResult={buyResult}
-                        buyError={buyError}
-                        onClearBuyResult={clearBuyResult}
-                        isAuthenticated={isAuthenticated}
-                      />
-                    </div>
+                  <div className="bot-block sell">
+                    <h3>3. Sell conditions</h3>
+                    <span className="mini-pill">Take profit: proposal payout</span>
+                    <span className="mini-pill">Stop when signal weakens</span>
+                  </div>
+
+                  <div className="bot-block restart">
+                    <h3>4. Restart trading conditions</h3>
+                    <p>If result is win, notify success and reset trade amount.</p>
+                    <p>If result is loss, reduce exposure and wait for the next bot signal.</p>
+                  </div>
+
+                  <div className="bot-block analytics">
+                    <h3>Live digit analytics</h3>
+                    <DigitStatsBar digitStats={digitStats} selectedDigit={selectedDigit} onDigitSelect={setSelectedDigit} />
+                  </div>
+
+                  <div className="bot-block controls">
+                    <h3>Manual trade controls</h3>
+                    <TradeControls
+                      tradeType={tradeType}
+                      contractMode={contractMode}
+                      onContractModeChange={setContractMode}
+                      selectedDigit={selectedDigit}
+                      isConnected={isConnected}
+                      stake={stake}
+                      onStakeChange={setStake}
+                      duration={duration}
+                      onDurationChange={setDuration}
+                      durationLimits={durationLimits}
+                      proposal={proposal}
+                      isProposalLoading={isProposalLoading}
+                      onBuy={buyContract}
+                      isBuying={isBuying}
+                      buyResult={buyResult}
+                      buyError={buyError}
+                      onClearBuyResult={clearBuyResult}
+                      isAuthenticated={isAuthenticated}
+                    />
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              )}
+            </section>
 
-            <div className="senior-risk-note">
-              Trading involves risk. Bots and indicators assist decisions but do not guarantee profit.
-              Use demo mode first, trade with a plan, and contact support on 0718462802 for setup help.
-            </div>
-          </>
-        )}
-      </div>
+            <aside className="senior-run-panel">
+              <button className="run-button" disabled={!isConnected || isBuying} onClick={() => runBotTrade(botPlans[0])} type="button">
+                <Play className="h-5 w-5" />
+                Run
+              </button>
+              <strong>{pendingBot ? `${pendingBot.name} is running` : 'Bot is not running'}</strong>
+              <div className="run-tabs">
+                <span className="active">Summary</span>
+                <span>Transact...</span>
+                <span>Journal</span>
+              </div>
+              <div className="summary-box">
+                <p>{pendingBot ? pendingBot.reason : 'Choose a bot below or hit Run. Performance appears here after execution.'}</p>
+                <div className="ai-badge">AI</div>
+              </div>
+              <div className="bot-list-runner">
+                {botPlans.map((bot) => (
+                  <button disabled={!isConnected || isBuying} key={bot.id} onClick={() => runBotTrade(bot)} type="button">
+                    <span>{bot.name}</span>
+                    <b>{bot.confidence}%</b>
+                    <small>{bot.reason}</small>
+                  </button>
+                ))}
+              </div>
+              <div className="run-totals">
+                <span>Total stake<br /><b>{stake || '0.00'} USD</b></span>
+                <span>Total payout<br /><b>{proposal ? proposal.payout.toFixed(2) : '0.00'} USD</b></span>
+                <span>No. of runs<br /><b>{pendingBot ? 1 : 0}</b></span>
+              </div>
+            </aside>
+          </section>
+        </div>
+      )}
 
       <div className="fixed bottom-0 left-0 right-0 border-t border-white/10 bg-[#08111f]/90 py-2 text-center backdrop-blur-xl">
         <Footer />
