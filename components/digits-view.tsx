@@ -44,6 +44,27 @@ import type {
 } from '@deriv/core';
 import type { ContractMode, TradeType, DigitStats } from '../lib/types';
 
+type BuilderTab =
+  | 'Dashboard'
+  | 'Bot Builder'
+  | 'Charts'
+  | 'Trading Bots'
+  | 'Analysis Tool'
+  | 'Strategies'
+  | 'Risk Calculator'
+  | 'Copy Trading'
+  | 'DTrader';
+
+type RunTab = 'Summary' | 'Transactions' | 'Journal';
+
+interface BackendInsight {
+  status: string;
+  strongestDigit: number;
+  weakestDigit: number;
+  parityBias: string;
+  message: string;
+}
+
 const DIGIT_TRADE_TYPE_OPTIONS: { value: TradeType; label: string }[] = [
   { value: 'matches-differs', label: 'Matches/Differs' },
   { value: 'over-under', label: 'Over/Under' },
@@ -65,6 +86,18 @@ const BOT_MENU = [
   'Restart trading conditions',
   'Analysis',
   'Virtual Hook Switcher',
+];
+
+const BUILDER_TABS: { label: BuilderTab; icon: typeof Bot }[] = [
+  { label: 'Dashboard', icon: Blocks },
+  { label: 'Bot Builder', icon: Bot },
+  { label: 'Charts', icon: LineChart },
+  { label: 'Trading Bots', icon: BrainCircuit },
+  { label: 'Analysis Tool', icon: BarChart3 },
+  { label: 'Strategies', icon: ShieldCheck },
+  { label: 'Risk Calculator', icon: Calculator },
+  { label: 'Copy Trading', icon: Copy },
+  { label: 'DTrader', icon: CandlestickChart },
 ];
 
 type BotId = 'digit-sniper' | 'match-hunter' | 'over-pulse' | 'under-sweep' | 'odd-even';
@@ -234,9 +267,21 @@ export function DigitsView({
 }: DigitsViewProps) {
   const isAuthenticated = authState === 'authenticated';
   const [pendingBot, setPendingBot] = useState<BotPlan | null>(null);
+  const [activeBuilderTab, setActiveBuilderTab] = useState<BuilderTab>('Bot Builder');
+  const [activeBlock, setActiveBlock] = useState('Trade parameters');
+  const [blockSearch, setBlockSearch] = useState('');
+  const [runTab, setRunTab] = useState<RunTab>('Summary');
+  const [showBanner, setShowBanner] = useState(true);
+  const [backendInsight, setBackendInsight] = useState<BackendInsight | null>(null);
+  const displayAccount = activeAccount && buyResult
+    ? { ...activeAccount, balance: String(buyResult.balanceAfter) }
+    : activeAccount;
   const botPlans = useMemo(
     () => buildBotPlans(digitStats, durationLimits),
     [digitStats, durationLimits]
+  );
+  const visibleBlockMenu = BOT_MENU.filter((item) =>
+    item.toLowerCase().includes(blockSearch.trim().toLowerCase())
   );
   const marketGroups = useMemo(() => {
     const groups = new Map<string, ActiveSymbol[]>();
@@ -255,11 +300,11 @@ export function DigitsView({
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [symbols]);
-  const accountBalance = activeAccount
-    ? `${Number(activeAccount.balance).toLocaleString('en-US', {
+  const accountBalance = displayAccount
+    ? `${Number(displayAccount.balance).toLocaleString('en-US', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      })} ${activeAccount.currency}`
+      })} ${displayAccount.currency}`
     : 'Connect account';
 
   function runBotTrade(plan: BotPlan) {
@@ -271,7 +316,16 @@ export function DigitsView({
     setDuration(plan.duration);
     if (!stake || Number(stake) <= 0) setStake('1');
     setPendingBot(plan);
+    setRunTab('Summary');
   }
+
+  const safePercentages = digitStats.percentages.length === 10
+    ? digitStats.percentages
+    : Array.from({ length: 10 }, () => 0);
+  const strongestDigit = safePercentages.indexOf(Math.max(...safePercentages));
+  const weakestDigit = safePercentages.indexOf(Math.min(...safePercentages));
+  const selectedBot = botPlans[0];
+  const maxExposure = Number(stake || '0') * Math.max(1, botPlans.length);
 
   useEffect(() => {
     if (!pendingBot || !isAuthenticated || !isConnected || isBuying || isProposalLoading || !proposal) return;
@@ -300,6 +354,28 @@ export function DigitsView({
     tradeType,
   ]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const controller = new AbortController();
+    void fetch('/api/bot-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        digitPercentages: digitStats.percentages,
+        totalTicks: digitStats.totalTicks,
+      }),
+      signal: controller.signal,
+    })
+      .then((response) => response.json())
+      .then((data: BackendInsight) => setBackendInsight(data))
+      .catch(() => {
+        if (!controller.signal.aborted) setBackendInsight(null);
+      });
+
+    return () => controller.abort();
+  }, [digitStats.percentages, digitStats.totalTicks, isAuthenticated]);
+
   if (error) {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-4">
@@ -320,7 +396,7 @@ export function DigitsView({
       <Header
         authState={authState}
         accounts={accounts}
-        activeAccount={activeAccount}
+        activeAccount={displayAccount}
         onLogin={onLogin}
         onSignUp={onSignUp}
         onLogout={onLogout}
@@ -339,11 +415,8 @@ export function DigitsView({
                 <Sparkles className="h-4 w-4" />
                 Senior Trader
               </div>
-              <h2>Login first. Trade on the bot-builder screen.</h2>
-              <p>
-                A focused trading app with five market-analysis bots. Connect your Deriv account, then enter a
-                dedicated trading workspace with live ticks, bot plans, and controlled execution.
-              </p>
+              <h2>Welcome to Senior Trader</h2>
+              <p>Login to open your live Deriv trading dashboard.</p>
               <div className="senior-hero-actions">
                 <Button
                   onClick={onLogin}
@@ -368,44 +441,32 @@ export function DigitsView({
             <div className="senior-login-card">
               <strong>Next screen</strong>
               <span>Bot Builder</span>
-              <p>After login, this page changes into a full bot-builder terminal. No trading happens on the intro page.</p>
+              <p>After login, this page opens the full bot-builder terminal.</p>
             </div>
-          </section>
-
-          <section className="senior-login-steps">
-            {['Login securely', 'Open bot builder', 'Run selected bot'].map((step, index) => (
-              <div key={step}>
-                <span>0{index + 1}</span>
-                <strong>{step}</strong>
-                <p>{index === 0 ? 'Use Deriv authentication.' : index === 1 ? 'View analysis and bot blocks.' : 'Click Run trade when ready.'}</p>
-              </div>
-            ))}
           </section>
         </div>
       ) : (
         <div className="senior-builder">
-          <div className="senior-red-strip">
-            DOLLARPRINTER STYLE - YOUR HUB FOR TRADING KNOWLEDGE, DERIV INDICES, AND BOT AUTOMATION
-            <X className="h-5 w-5" />
-          </div>
+          {showBanner && (
+            <div className="senior-red-strip">
+              SENIOR TRADER - YOUR HUB FOR LIVE DERIV MARKETS, BOT AUTOMATION, AND CONTROLLED EXECUTION
+              <button aria-label="Close announcement" className="banner-close" onClick={() => setShowBanner(false)} type="button">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          )}
 
           <nav className="senior-blue-tabs">
-            {[
-              ['Dashboard', Blocks],
-              ['Bot Builder', Bot],
-              ['Charts', LineChart],
-              ['Trading Bots', BrainCircuit],
-              ['Analysis Tool', BarChart3],
-              ['Strategies', ShieldCheck],
-              ['Risk Calculator', Calculator],
-              ['Copy Trading', Copy],
-              ['DTrader', CandlestickChart],
-            ].map(([label, Icon]) => {
-              const TabIcon = Icon as typeof Bot;
+            {BUILDER_TABS.map(({ label, icon: TabIcon }) => {
               return (
-                <button className={label === 'Bot Builder' ? 'active' : ''} key={label as string} type="button">
+                <button
+                  className={activeBuilderTab === label ? 'active' : ''}
+                  key={label}
+                  onClick={() => setActiveBuilderTab(label)}
+                  type="button"
+                >
                   <TabIcon className="h-4 w-4" />
-                  {label as string}
+                  {label}
                 </button>
               );
             })}
@@ -440,30 +501,52 @@ export function DigitsView({
 
           <section className="senior-builder-grid">
             <aside className="senior-blocks-menu">
-              <button className="quick">Quick strategy</button>
+              <button className="quick" onClick={() => setActiveBuilderTab('Trading Bots')} type="button">
+                Quick strategy
+              </button>
               <div className="blocks-title">Blocks menu</div>
-              <input placeholder="Search" />
-              {BOT_MENU.map((item) => (
-                <button key={item} type="button">{item}</button>
+              <input onChange={(event) => setBlockSearch(event.target.value)} placeholder="Search" value={blockSearch} />
+              {visibleBlockMenu.map((item) => (
+                <button
+                  className={activeBlock === item ? 'active' : ''}
+                  key={item}
+                  onClick={() => {
+                    setActiveBlock(item);
+                    setActiveBuilderTab('Bot Builder');
+                  }}
+                  type="button"
+                >
+                  {item}
+                </button>
               ))}
-              <span className="risk-chip">Risk Disclaimer</span>
+              <button className="risk-chip" onClick={() => setActiveBuilderTab('Risk Calculator')} type="button">
+                Risk Disclaimer
+              </button>
             </aside>
 
             <section className="senior-builder-canvas">
               <div className="senior-toolbar">
-                <FileText className="h-5 w-5" />
-                <LineChart className="h-5 w-5" />
-                <Zap className="h-5 w-5" />
+                <button aria-label="Trade parameters" onClick={() => setActiveBlock('Trade parameters')} type="button">
+                  <FileText className="h-5 w-5" />
+                </button>
+                <button aria-label="Charts" onClick={() => setActiveBuilderTab('Charts')} type="button">
+                  <LineChart className="h-5 w-5" />
+                </button>
+                <button aria-label="Trading bots" onClick={() => setActiveBuilderTab('Trading Bots')} type="button">
+                  <Zap className="h-5 w-5" />
+                </button>
                 <span />
-                <Activity className="h-5 w-5" />
+                <button aria-label="Analysis tool" onClick={() => setActiveBuilderTab('Analysis Tool')} type="button">
+                  <Activity className="h-5 w-5" />
+                </button>
               </div>
 
               {isLoading ? (
                 <Skeleton className="h-[520px] w-full rounded-xl" />
-              ) : (
+              ) : activeBuilderTab === 'Bot Builder' ? (
                 <div className="senior-block-board">
                   <div className="bot-block trade-params">
-                    <h3>1. Trade parameters</h3>
+                    <h3>1. {activeBlock}</h3>
                     <div className="block-row"><span>Market</span><b>{activeSymbol?.underlying_symbol_name ?? 'Select market'}</b></div>
                     <div className="block-row"><span>Trade type</span><b>{tradeType}</b></div>
                     <div className="block-row"><span>Contract</span><b>{contractMode}</b></div>
@@ -520,6 +603,99 @@ export function DigitsView({
                     />
                   </div>
                 </div>
+              ) : (
+                <div className="senior-tab-panel">
+                  <div className="senior-tab-panel-head">
+                    <span>{activeBuilderTab}</span>
+                    <strong>{activeSymbol?.underlying_symbol_name ?? 'Select a market'}</strong>
+                  </div>
+
+                  {activeBuilderTab === 'Dashboard' && (
+                    <div className="senior-dashboard-cards">
+                      <div><span>Balance</span><b>{accountBalance}</b></div>
+                      <div><span>Live market</span><b>{activeSymbol?.underlying_symbol_name ?? 'Waiting'}</b></div>
+                      <div><span>Last digit</span><b>{lastDigit ?? '-'}</b></div>
+                      <div><span>Connection</span><b>{isConnected ? 'Live feed connected' : 'Connecting'}</b></div>
+                    </div>
+                  )}
+
+                  {activeBuilderTab === 'Charts' && (
+                    <div className="senior-chart-panel">
+                      <CurrentTickDisplay tick={currentTick} lastDigit={lastDigit} activeSymbol={activeSymbol} pipSize={pipSize} />
+                      <DigitStatsBar digitStats={digitStats} selectedDigit={selectedDigit} onDigitSelect={setSelectedDigit} />
+                    </div>
+                  )}
+
+                  {activeBuilderTab === 'Trading Bots' && (
+                    <div className="senior-bot-grid-page">
+                      {botPlans.map((bot) => (
+                        <button disabled={!isConnected || isBuying} key={bot.id} onClick={() => runBotTrade(bot)} type="button">
+                          <Bot className="h-5 w-5" />
+                          <strong>{bot.name}</strong>
+                          <span>{bot.confidence}% confidence</span>
+                          <p>{bot.reason}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeBuilderTab === 'Analysis Tool' && (
+                    <div className="senior-analysis-panel">
+                      <div><span>Strongest digit</span><b>{strongestDigit}</b></div>
+                      <div><span>Weakest digit</span><b>{weakestDigit}</b></div>
+                      <div><span>Total ticks</span><b>{digitStats.totalTicks}</b></div>
+                      <div><span>Backend status</span><b>{backendInsight?.status ?? 'ready'}</b></div>
+                      <p>{backendInsight?.message ?? selectedBot.reason}</p>
+                    </div>
+                  )}
+
+                  {activeBuilderTab === 'Strategies' && (
+                    <div className="senior-analysis-panel">
+                      {botPlans.map((bot) => (
+                        <div key={bot.id}><span>{bot.name}</span><b>{bot.contractMode}</b><p>{bot.reason}</p></div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeBuilderTab === 'Risk Calculator' && (
+                    <div className="senior-dashboard-cards">
+                      <div><span>Stake</span><b>{stake || '0.00'} USD</b></div>
+                      <div><span>Possible payout</span><b>{proposal ? proposal.payout.toFixed(2) : '0.00'} USD</b></div>
+                      <div><span>Max bot exposure</span><b>{maxExposure.toFixed(2)} USD</b></div>
+                      <div><span>Account mode</span><b>{displayAccount?.account_type ?? 'Connected'}</b></div>
+                    </div>
+                  )}
+
+                  {activeBuilderTab === 'Copy Trading' && (
+                    <div className="senior-analysis-panel">
+                      <div><span>Copy room</span><b>Ready</b></div>
+                      <p>Use this area to review bot signals before copying them. Real trades still require your connected Deriv session.</p>
+                    </div>
+                  )}
+
+                  {activeBuilderTab === 'DTrader' && (
+                    <TradeControls
+                      tradeType={tradeType}
+                      contractMode={contractMode}
+                      onContractModeChange={setContractMode}
+                      selectedDigit={selectedDigit}
+                      isConnected={isConnected}
+                      stake={stake}
+                      onStakeChange={setStake}
+                      duration={duration}
+                      onDurationChange={setDuration}
+                      durationLimits={durationLimits}
+                      proposal={proposal}
+                      isProposalLoading={isProposalLoading}
+                      onBuy={buyContract}
+                      isBuying={isBuying}
+                      buyResult={buyResult}
+                      buyError={buyError}
+                      onClearBuyResult={clearBuyResult}
+                      isAuthenticated={isAuthenticated}
+                    />
+                  )}
+                </div>
               )}
             </section>
 
@@ -530,12 +706,22 @@ export function DigitsView({
               </button>
               <strong>{pendingBot ? `${pendingBot.name} is running` : 'Bot is not running'}</strong>
               <div className="run-tabs">
-                <span className="active">Summary</span>
-                <span>Transact...</span>
-                <span>Journal</span>
+                {(['Summary', 'Transactions', 'Journal'] as RunTab[]).map((tab) => (
+                  <button className={runTab === tab ? 'active' : ''} key={tab} onClick={() => setRunTab(tab)} type="button">
+                    {tab === 'Transactions' ? 'Transact...' : tab}
+                  </button>
+                ))}
               </div>
               <div className="summary-box">
-                <p>{pendingBot ? pendingBot.reason : 'Choose a bot below or hit Run. Performance appears here after execution.'}</p>
+                {runTab === 'Summary' && (
+                  <p>{pendingBot ? pendingBot.reason : 'Choose a bot below or hit Run. Performance appears here after execution.'}</p>
+                )}
+                {runTab === 'Transactions' && (
+                  <p>{buyResult ? `Bought contract ${buyResult.contractId}. Balance: ${buyResult.balanceAfter.toFixed(2)} ${displayAccount?.currency ?? ''}` : 'No new transaction yet.'}</p>
+                )}
+                {runTab === 'Journal' && (
+                  <p>{buyError ?? backendInsight?.message ?? 'Market analysis journal is ready.'}</p>
+                )}
                 <div className="ai-badge">AI</div>
               </div>
               <div className="bot-list-runner">
