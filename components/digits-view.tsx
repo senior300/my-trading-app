@@ -12,6 +12,7 @@ import { TradeTypeChips } from '@/components/custom/trade-type-chips';
 import { SymbolSelector } from '@/components/custom/symbol-selector';
 import { ThemeToggle } from '@/components/custom/theme-toggle';
 import { Button } from '@/components/ui/button';
+import { getMarketDisplayName } from '@/lib/active-symbols-display-names';
 import {
   Activity,
   BarChart3,
@@ -237,6 +238,23 @@ export function DigitsView({
     () => buildBotPlans(digitStats, durationLimits),
     [digitStats, durationLimits]
   );
+  const marketGroups = useMemo(() => {
+    const groups = new Map<string, ActiveSymbol[]>();
+    for (const symbol of symbols) {
+      const existing = groups.get(symbol.market) ?? [];
+      existing.push(symbol);
+      groups.set(symbol.market, existing);
+    }
+
+    return Array.from(groups.entries())
+      .map(([market, group]) => ({
+        market,
+        name: group[0]?.market_display_name ?? getMarketDisplayName(market),
+        symbols: group.slice(0, 8),
+        count: group.length,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [symbols]);
   const accountBalance = activeAccount
     ? `${Number(activeAccount.balance).toLocaleString('en-US', {
         minimumFractionDigits: 2,
@@ -392,6 +410,33 @@ export function DigitsView({
               );
             })}
           </nav>
+
+          <section className="senior-all-markets">
+            <div>
+              <span>All markets</span>
+              <strong>{symbols.length} tradable symbols</strong>
+            </div>
+            <div className="senior-market-scroll">
+              {marketGroups.map((group) => (
+                <div className="senior-market-group" key={group.market}>
+                  <b>{group.name}</b>
+                  <small>{group.count} markets</small>
+                  <div>
+                    {group.symbols.map((symbol) => (
+                      <button
+                        className={activeSymbol?.underlying_symbol === symbol.underlying_symbol ? 'selected' : ''}
+                        key={symbol.underlying_symbol}
+                        onClick={() => selectSymbol(symbol.underlying_symbol)}
+                        type="button"
+                      >
+                        {symbol.underlying_symbol_name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
 
           <section className="senior-builder-grid">
             <aside className="senior-blocks-menu">
